@@ -1,0 +1,15 @@
+apply plugin: 'java-library'
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation 'com.squareup.okhttp3:okhttp:3.10.0'
+
+    /*这里的 Java 文件可能不是 UTF-8格式，Gradle编译处理这些字符的时候不能通过.这里将其转换程 UTF-8*/
+    tasks.withType(JavaCompile) {
+        options.encoding = "UTF-8"
+    }
+}
+
+
+sourceCompatibility = "1.8"
+targetCompatibility = "1.8"
