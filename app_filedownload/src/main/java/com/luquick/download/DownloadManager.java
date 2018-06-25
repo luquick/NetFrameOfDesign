@@ -4,9 +4,11 @@ import android.support.annotation.NonNull;
 
 import com.luquick.download.db.DownloadHelper;
 import com.luquick.download.db.entity.DownloadEntity;
+import com.luquick.download.file.FileStorageManager;
 import com.luquick.download.http.impl.HttpManager;
 import com.luquick.download.http.interf.DownloadCallBack;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -36,7 +38,13 @@ public class DownloadManager {
 
     private static final DownloadManager sManager = new DownloadManager();
 
-//    private static final ExecutorService sLocal_progress_Poll = new Executors.newFixedThreadPool(1);
+    /**
+     * 用于刷新进度
+     */
+    private static final ExecutorService mLocalProgressPool = Executors.newFixedThreadPool(1);
+
+    //文件长度
+    private long mlength;
 
     //当前任务唯一
     //用于防止同一个任务的多此提交
@@ -125,12 +133,12 @@ public class DownloadManager {
                         return;
                     }
 
-                    long length = response.body().contentLength();
-                    if (length == -1) {
+                    mlength = response.body().contentLength();
+                    if (mlength == -1) {
                         callBack.fail(HttpManager.CONTENT_LENGTH_ERROR_CODE, "content length  -1");
                         return;
                     }
-                    processDownload(url, length, callBack, mCache);
+                    processDownload(url, mlength, callBack, mCache);
                     //TODO 需要在下载完成之后操作  CallBack之后
                     finish(downloadTask);
                 }
@@ -139,7 +147,12 @@ public class DownloadManager {
             //快捷键 todo + enter
             // TODO: 2018/6/25 处理已经下载过的数据
             //快捷键 XXX.for + enter
-            for (DownloadEntity entity : mCache) {
+            for (int i = 0; i < mCache.size(); i++) {
+                DownloadEntity entity = mCache.get(i);
+                //取到最后一个数据
+                if (i == mCache.size() - 1) {
+                    mlength = entity.getEnd_position() + 1;
+                }
 
                 //是一个 BUG,检测本地文件大小，需要拿到文件计算长度，然后根据长度后面部分下载。
                 //startDownloadSize ---- 当前下载的数据长度.getStart_position() + entity.getProgress_position();
@@ -152,8 +165,32 @@ public class DownloadManager {
                         url,
                         callBack, entity));
             }
-
         }
+
+        mLocalProgressPool.execute(new Runnable() {
+            @Override
+            public void run() {
+                while (true) {
+                    try {
+                        //当前线程每个500毫秒检查进度
+                        Thread.sleep(500);
+                        //得到当前下载的本地文件
+                        File file = FileStorageManager.getInstance().getFileByName(url);
+                        //拿到当前文件的当前大小
+                        long fileSize = file.length();
+                        int progress = (int) (fileSize*100.0/mlength);
+                        if (progress >= 100) {
+                            //100 同步进度条终止
+                            callBack.progress(progress);
+                            return;
+                        }
+                        callBack.progress(progress);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        });
     }
 
     /**

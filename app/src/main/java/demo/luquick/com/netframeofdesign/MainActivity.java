@@ -4,9 +4,12 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.support.v4.content.FileProvider;
 import android.support.v7.app.AppCompatActivity;
 import android.view.View;
+import android.widget.Button;
 import android.widget.ImageView;
 
 import com.luquick.download.DownloadManager;
@@ -26,7 +29,6 @@ public class MainActivity extends AppCompatActivity {
      * CallBack会被回掉两次，此变量用于过滤。不是很友好呀。。。。。
      */
     private int count;
-    private int count2;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,10 +66,6 @@ public class MainActivity extends AppCompatActivity {
         HttpManager.getInterface().asyncRequestDownload(mUrl, new DownloadCallBack() {
             @Override
             public void success(File file) {
-                if (count < 1) {
-                    count++;
-                    return;
-                }
                 Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
                 ////这里使用的是lambda ...匿名函数
                 runOnUiThread(() -> mImageView.setImageBitmap(bitmap));
@@ -95,8 +93,10 @@ public class MainActivity extends AppCompatActivity {
                 new DownloadCallBack() {
                     @Override
                     public void success(File file) {
-                        if (count2 < 1) {
-                            count2++;
+
+                        //TODO 需要优化
+                        if (count < 1) {
+                            count++;
                             return;
                         }
                         Logger.debug("Hello", "success --------");
@@ -106,18 +106,27 @@ public class MainActivity extends AppCompatActivity {
                         //todo 测试下载图片
                        /* Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
                         runOnUiThread(() -> mImageView.setImageBitmap(bitmap));*/
-                        Logger.debug("nate", "success + " + file.getAbsolutePath());
+                        Logger.debug("Hello", "success + " + file.getAbsolutePath());
                     }
 
                     @Override
                     public void fail(int errorCode, String errorMessage) {
-                        Logger.debug("nate",
+                        Logger.debug("Hello",
                                 "fail + errorCode = " + errorCode
                                         + ";\nerrorMellage = " + errorMessage);
                     }
 
                     @Override
                     public void progress(int progress) {
+                        Logger.debug("Hello", "progress = " + progress);
+                        //TODO 处理UI 进度更新
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                Button button = findViewById(R.id.button);
+                                button.setText(""+progress);
+                            }
+                        });
                     }
                 });
     }
@@ -127,9 +136,22 @@ public class MainActivity extends AppCompatActivity {
      * 需要下载的APK
      */
     private void installApk(File file) {
+//        Intent intent = new Intent(Intent.ACTION_VIEW);
+//        intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
+//        intent.setDataAndType(Uri.parse("file://" + file.getAbsoluteFile().toString()), "application/vnd.android.package-archive");
+//        startActivity(intent);
+
+
         Intent intent = new Intent(Intent.ACTION_VIEW);
-        intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        intent.setDataAndType(Uri.parse("file://" + file.getAbsoluteFile().toString()), "application/vnd.android.package-archive");
+        //判断是否是AndroidN以及更高的版本
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            Uri contentUri = FileProvider.getUriForFile(this, BuildConfig.APPLICATION_ID + ".fileProvider", file);
+            intent.setDataAndType(contentUri, "application/vnd.android.package-archive");
+        } else {
+            intent.setDataAndType(Uri.fromFile(file), "application/vnd.android.package-archive");
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
         startActivity(intent);
 
     }
