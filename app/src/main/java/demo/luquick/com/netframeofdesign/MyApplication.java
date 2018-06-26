@@ -3,6 +3,8 @@ package demo.luquick.com.netframeofdesign;
 import android.app.Application;
 
 import com.facebook.stetho.Stetho;
+import com.luquick.download.DownloadConfig;
+import com.luquick.download.DownloadManager;
 import com.luquick.download.db.DownloadHelper;
 import com.luquick.download.file.FileStorageManager;
 import com.luquick.download.http.impl.HttpManager;
@@ -25,5 +27,13 @@ public class MyApplication extends Application {
         FileStorageManager.getInstance().init(this);
         HttpManager.getInterface().init(this);
         DownloadHelper.getInstances().init(this);
+
+        //线程池的相关初始化
+        DownloadConfig config = new DownloadConfig.Builder()
+                .setCoreThreadSize(2)
+                .setMaxThreadSize(4)
+                .setLocalProgressThreadSize(1)
+                .builder();
+        DownloadManager.getInstance().init(config);
     }
 }

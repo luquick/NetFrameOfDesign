@@ -34,32 +34,49 @@ import okhttp3.Response;
  */
 public class DownloadManager {
 
-    private final static int MAX_THREAD = 2;
+    public final static int MAX_THREAD = 2;
+    public final static int LOCAL_PROGRESS_SIZE = 1;
 
-    private static final DownloadManager sManager = new DownloadManager();
-
-    /**
-     * 用于刷新进度
-     */
-    private static final ExecutorService mLocalProgressPool = Executors.newFixedThreadPool(1);
-
-    //文件长度
-    private long mlength;
+    private static volatile DownloadManager sManager = new DownloadManager();
 
     //当前任务唯一
     //用于防止同一个任务的多此提交
     private HashSet<DownloadTask> mHashSet = new HashSet<>();
 
-    /**
-     *
-     */
-    private List<DownloadEntity> mCache;
+    //下载线程池
+    private static ThreadPoolExecutor sThreadPool;
+
+    //用于刷新进度
+    private static ExecutorService mLocalProgressPool;
+
+    //本地下载实体的缓存
+    private List<DownloadEntity> mCaches;
+
+    //文件长度
+    private long mlength;
 
     private DownloadManager() {
     }
 
-    public static DownloadManager getInstance() {
-        return sManager;
+    public void init(DownloadConfig config) {
+        sThreadPool = new ThreadPoolExecutor(
+                config.getCoreThreadSize(),
+                config.getMaxThreadSize(),
+                60,
+                TimeUnit.MILLISECONDS,
+                new SynchronousQueue<Runnable>(),
+                new ThreadFactory() {
+                    private AtomicInteger mInteger = new AtomicInteger();
+
+                    @Override
+                    public Thread newThread(@NonNull Runnable r) {
+                        Thread thread = new Thread(r, "download thread # "
+                                + mInteger.getAndIncrement());
+                        return thread;
+                    }
+                });
+
+        mLocalProgressPool = Executors.newFixedThreadPool(config.getLocalProgressThreadSize());
     }
 
     //线程池
@@ -74,22 +91,49 @@ public class DownloadManager {
      * //-----------------------------
      * ThreadFactory ??
      */
-    private static final ThreadPoolExecutor sThreadPool = new ThreadPoolExecutor(
-            MAX_THREAD,
-            MAX_THREAD,
-            60,
-            TimeUnit.MILLISECONDS,
-            new SynchronousQueue<Runnable>(),
-            new ThreadFactory() {
-                private AtomicInteger mInteger = new AtomicInteger();
 
-                @Override
-                public Thread newThread(@NonNull Runnable r) {
-                    Thread thread = new Thread(r, "download thread # "
-                            + mInteger.getAndIncrement());
-                    return thread;
+
+    //饿汉模式--单例
+    public static DownloadManager getInstance() {
+        return sManager;
+    }
+
+    //懒汉模式--单例
+    /*public static DownloadManager getInstance() {
+        if (sManager == null) {
+           sManager = new DownloadManager();
+        }
+        return sManager;
+    }*/
+
+    // double check 模式-单例
+    /*public static DownloadManager getInstance() {
+        if (sManager == null) {
+            synchronized (DownloadManager.class) {
+                if (sManager == null) {
+                    sManager = new DownloadManager();
+                    //简单的赋值操作会出现以下三种状态，从而也导致原子性操作的失败，有可能会抛出空指针。
+                    //在编译过程中一下三个顺序是随机的，并不是按顺序进行，从而导致原子性破坏，空指针情况的发生
+                    //1.sManager分配内存
+                    //2.sManager调用构造方法初始化
+                    //3.sManager指向内存分配的区域
+                    //引入 volatile ---- 进制 Java重排序; 可见性。
                 }
-            });
+            }
+            return sManager;
+        }
+        return sManager;
+    }*/
+
+    //静态内部类--单例
+    //原子性，延迟加载-------优选
+    /*public static class Holder {
+        private static DownloadManager manager = new DownloadManager();
+
+        public static DownloadManager getInstance() {
+            return manager;
+        }
+    }*/
 
 
     /**
@@ -117,9 +161,9 @@ public class DownloadManager {
             return;
         }
         mHashSet.add(downloadTask);
-        mCache = DownloadHelper.getInstances().getAll(url);
+        mCaches = DownloadHelper.getInstances().getAll(url);
         //没有数据的情况下，下载。
-        if (mCache == null || mCache.size() == 0) {
+        if (mCaches == null || mCaches.size() == 0) {
             HttpManager.getInterface().asyncRequestOfMultiThreadDownload(url, new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
@@ -138,7 +182,7 @@ public class DownloadManager {
                         callBack.fail(HttpManager.CONTENT_LENGTH_ERROR_CODE, "content length  -1");
                         return;
                     }
-                    processDownload(url, mlength, callBack, mCache);
+                    processDownload(url, mlength, callBack, mCaches);
                     //TODO 需要在下载完成之后操作  CallBack之后
                     finish(downloadTask);
                 }
@@ -147,10 +191,10 @@ public class DownloadManager {
             //快捷键 todo + enter
             // TODO: 2018/6/25 处理已经下载过的数据
             //快捷键 XXX.for + enter
-            for (int i = 0; i < mCache.size(); i++) {
-                DownloadEntity entity = mCache.get(i);
+            for (int i = 0; i < mCaches.size(); i++) {
+                DownloadEntity entity = mCaches.get(i);
                 //取到最后一个数据
-                if (i == mCache.size() - 1) {
+                if (i == mCaches.size() - 1) {
                     mlength = entity.getEnd_position() + 1;
                 }
 
@@ -206,7 +250,7 @@ public class DownloadManager {
         //100 2 50 0-49 50-99
         long threadDownloadSize = length / MAX_THREAD;
         if (downloadEntities == null || downloadEntities.size() == 0) {
-            mCache = new ArrayList<>();
+            mCaches = new ArrayList<>();
         }
         for (int i = 0; i < MAX_THREAD; i++) {
             DownloadEntity dEntity = new DownloadEntity();
